@@ -24,13 +24,40 @@ object Operations : HashMap<String, Operation>(){
 
     private fun checkDataTypesAndEvaluate(value: Any, variables: Map<String, Double>): Double =
         if (value is Double) value.toDouble()
-        else if (value is MathToken) value.evaluate()
+        else if (value is MathToken) value.evaluate(variables)
         else if (value is List<*>) (value as List<Any>).evaluate(variables)
         else throw UnsupportedTypeException(value::class)
 
     private fun init () {
         this.putAll(hashMap)
     }
+
+    val differentiate = Operation(
+        identifier = "differentiate",
+        parameters = Pair(1, false),
+        before = true,
+        function = { expression, parameters, variables ->
+            println(parameters)
+            println(variables)
+            val h = checkDataTypesAndEvaluate(parameters[1], variables)
+            val fx = expression.evaluate(variables)
+            val hvars = variables.toMutableMap()
+            variables.forEach { key, value ->
+                hvars[key] = value+h
+            }
+            val fxh = expression.evaluate(hvars)
+            (fxh-fx)/h
+        }
+    )
+
+    val diffequation = Operation(
+        identifier = "diffequation",
+        parameters = Pair(2, false),
+        before = true,
+        function = {expression, parameters, variables->
+            0.0
+        }
+    )
 
     //Basic maths
     val negate = Operation(
@@ -216,6 +243,10 @@ object Operations : HashMap<String, Operation>(){
         "sinh" to sinh,
         "cosh" to cosh,
         "tanh" to tanh,
+        "log" to log,
+        "ln" to ln,
+        "differentiate" to differentiate,
+        "diffequation" to diffequation,
     )
 }
 

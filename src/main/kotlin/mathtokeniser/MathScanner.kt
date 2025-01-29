@@ -1,34 +1,130 @@
 package uk.co.purpleeagle.mathtokeniser
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import uk.co.purpleeagle.models.stackOf
 import uk.co.purpleeagle.tokeniser.Scanner
 import uk.co.purpleeagle.tokeniser.Token
 import uk.co.purpleeagle.tokeniser.TokenType
+import uk.co.purpleeagle.util.log
+import uk.co.purpleeagle.util.removeAtIndexes
+import kotlin.system.exitProcess
 
 class MathScanner(
-    val source: MutableList<Token>
+    val source: MutableList<Token>,
 ) {
-    var tokens = arrayListOf<MathToken>()
+    /**
+     * Holds a value in the form
+     * [expression]^[power]
+     */
+    inner class Power(
+        val expression: List<Token>,
+        val power: List<Token>
+    ) {
+        fun assembleMathToken(coefficient: MathToken?) : MathToken = MathToken(
+            coefficient = coefficient,
+            expression = assembleExpression(expression),
+            parameters = assembleExpression(power),
+            function = Operations.power.function
 
-    var lhs: List<Token>
-    var rhs: List<Token>
+        )
 
-    init {
-        source.forEachIndexed { index, token ->
-            if (token.tokenType == TokenType.IDENTIFIER) {
-                if (Operations.hashMap.containsKey(token.lexeme)) source[index] = source[index].copy(TokenType.OPERATION)
-            }
+        override fun toString(): String {
+            return "Power(expression=$expression, power=$power)"
         }
-
-        val equalsIndex = source.indexOfFirst { it.tokenType == TokenType.EQUAL }
-        lhs = source.subList(0, equalsIndex)
-        rhs = source.subList(equalsIndex + 1, source.size)
     }
 
-    fun generateExpressions(givenTokens: List<Token>): List<MathToken> {
-        val sourceTokens = if (givenTokens.first().tokenType != TokenType.PLUS) regenerateTokens(givenTokens)
+    /**
+     * Holds a value in the form
+     * f([expression], [parameters])
+     */
+    data class Function (
+        val function: Operation?,
+        val expression: Power,
+        val parameters: List<Power>
+    ) {
+        fun assembleMathToken(coefficient: MathToken?) : MathToken = MathToken(
+            coefficient = coefficient,
+            expression = listOf(expression.assembleMathToken(null)),
+            parameters = parameters.map {
+                it.assembleMathToken(null)
+            },
+            function = function?.function
+        )
+    }
+
+    /**
+     * General use evaluation code
+     */
+    fun evaluateExpression() = generateExpressions(source)
+
+    companion object {
+        /**
+         * Can be used without having to create an instance of the class
+         */
+        fun evaluateExpression(tokens : List<Token>) = MathScanner(mutableListOf()).generateExpressions(tokens)
+    }
+
+    /**
+     * Generate an equation from tokens
+     */
+    fun getEquation() : Equation = runBlocking{
+        var lhs: List<Token> = emptyList()
+        var rhs: List<Token> = emptyList()
+        var equalsIndex = 0
+        var bracketsOpened = 0
+        source.forEachIndexed { index, token ->
+            when (token.tokenType) {
+                TokenType.LEFT_BRACKET -> bracketsOpened++
+                TokenType.RIGHT_BRACKET -> bracketsOpened--
+                TokenType.LEFT_BRACE -> bracketsOpened++
+                TokenType.RIGHT_BRACE -> bracketsOpened--
+                TokenType.EQUAL -> {
+                    if (bracketsOpened == 0) {
+                        equalsIndex = index
+                        lhs = source.subList(0, equalsIndex)
+                    }
+                }
+                else -> {}
+            }
+        }
+        rhs = source.subList(equalsIndex+1, source.size)
+        //lhs.log("Lhs")
+        //rhs.log("Rhs")
+        var lhsMathToken: List<MathToken> = emptyList()
+        val lhsJob = CoroutineScope(Dispatchers.Unconfined).launch {
+            lhsMathToken = generateExpressions(lhs)
+            //lhsMathToken.log("LHS MATH TOKEN")
+        }
+
+        var rhsMathToken: List<MathToken> = emptyList()
+            //rhs.log("RHS")
+        val rhsJob = CoroutineScope(Dispatchers.Unconfined).launch {
+            rhsMathToken = generateExpressions(rhs)
+            //rhsMathToken.log("RHS MATH TOKEN")
+        }
+
+        lhsJob.join()
+        rhsJob.join()
+
+        return@runBlocking Equation(
+            lhs = lhsMathToken,
+            rhs = rhsMathToken,
+        )
+    }
+
+    /**
+     * Splits a give list of tokens by plus signs.
+     * e.g. 1+3(2+4), goes to [1, 3(2+4)]
+     */
+    private fun generateExpressions(givenTokens: List<Token>): List<MathToken> {
+        val temp = findDerivatives(givenTokens)
+        val sourceTokens = if (temp.first().tokenType != TokenType.PLUS) regenerateTokens(givenTokens)
         else givenTokens
-        println("Source tokens are $sourceTokens")
+//        sourceTokens.log("Source tokens")
+        //println("Source tokens are $sourceTokens")
         var bracketOpened = stackOf<Int>()
         var braceOpened = stackOf<Int>()
         var expressions = mutableListOf<List<Token>>()
@@ -51,181 +147,297 @@ class MathScanner(
             }
             current++
         }
-        println("Plus indexes are $plusIndexes")
+        //println("Plus indexes are $plusIndexes")
 
         for (i in plusIndexes.indices) {
             try {
                 expressions.add(sourceTokens.subList(plusIndexes[i]+1, plusIndexes[i+1]))
-                println("Expressions are $expressions")
+                //println("Expressions are $expressions")
             }catch (_: Exception){}
         }
-        expressions.removeAll { it.isEmpty() }
-        println("From generate expression is $expressions")
-        return expressions.map { splitExpressions(it) }
-    }
 
-    private fun splitExpressions(tokens: List<Token>): MathToken {
-        val splitTokens = mutableListOf<List<Token>>()
-        var bracketOpened = stackOf<Int>()
-        var braceOpened = stackOf<Int>()
-        var parametersRequired = 0
-        var lastSavedIndex = 0
+        do {
+            val start = expressions
 
-        for (index in tokens.indices) {
-            println("After loop $index, lastSavedIndex $lastSavedIndex")
-            var token = tokens[index]
-            when (token.tokenType) {
-                TokenType.LEFT_BRACKET -> {
-                    bracketOpened.push(index)
-                    splitTokens.add(tokens.subList(lastSavedIndex, index))
+            expressions.forEachIndexed { index, expression ->
+                var bracketsClosedEarly = false
+                var bracketOpened = stackOf<Int>()
+                if (expression.any { it.tokenType == TokenType.LEFT_BRACKET }) {
+                    expression.forEachIndexed { i,token ->
+                        when (token.tokenType) {
+                            in listOf(TokenType.LEFT_BRACKET, TokenType.LEFT_BRACE) -> bracketOpened.push(i)
+                            in listOf(TokenType.RIGHT_BRACKET, TokenType.RIGHT_BRACE) -> {
+                                bracketOpened.pop()
+                                if (bracketOpened.isEmpty() && index != expression.lastIndex) bracketsClosedEarly = true
+                            }
+                            else -> {}
+                        }
+                    }
                 }
-                TokenType.RIGHT_BRACKET -> {
-                    val last = bracketOpened.pop()
-                    if(bracketOpened.isEmpty()) splitTokens.add(tokens.subList(last+1, index))
-                    lastSavedIndex = index
-                }
-                TokenType.LEFT_BRACE -> {
-                    braceOpened.push(index)
-                    splitTokens.add(tokens.subList(lastSavedIndex, index))
-                    println("Left bracket caused save of : ${tokens.subList(lastSavedIndex, index)}")
-                }
-                TokenType.RIGHT_BRACE -> {
-                    val last = braceOpened.pop()
-                    if(braceOpened.isEmpty()) splitTokens.add(tokens.subList(last+1, index))
-                    parametersRequired--
-                    lastSavedIndex = index
-                }
-                TokenType.OPERATION -> {
-                    splitTokens.add(tokens.subList(lastSavedIndex, index))
-                    println("First add, Just Added : ${tokens.subList(lastSavedIndex, index)}")
-                    splitTokens.add(listOf(token))
-                    println("Second add, Just Added : $token")
-                    val operation = Operations.hashMap[token.lexeme] ?: throw Exception("Function [${token.lexeme}] not yet supported")
-                    parametersRequired += operation.parameters.first
-                    lastSavedIndex = index+1
-                }
-
-                TokenType.POWER -> {
-                    splitTokens.add(tokens.subList(lastSavedIndex, index))
-                    splitTokens.add(listOf(token))
-                    lastSavedIndex = index
-                }
-                else -> {}
-            }
-        }
-        try {
-            //if (lastSavedIndex > 0) lastSavedIndex ++
-            println("End, lastSavedIndex $lastSavedIndex")
-            println("Size is ${tokens.size}")
-            splitTokens.add(tokens.takeLast(tokens.size-lastSavedIndex))
-        }catch (_: Exception){}
-        println("Pre clearing is $splitTokens")
-        val cleared = mutableListOf<List<Token>>()
-        for (token in splitTokens) {
-            if (token.isNotEmpty()) {
-                if (token.first().tokenType !in listOf(TokenType.RIGHT_BRACKET, TokenType.RIGHT_BRACE, TokenType.LEFT_BRACKET,
-                        TokenType.RIGHT_BRACE)) {
-                    if (token.size > 1 && token.first().tokenType == TokenType.OPERATION) {
-                        cleared.add(token.takeLast(token.size-1))
-                    }else {
-                        cleared.add(token)
+//                expression.log("Expression")
+                if (!bracketsClosedEarly) {
+                    if (expression.first().tokenType in listOf(TokenType.LEFT_BRACKET, TokenType.LEFT_BRACE) && expression.last().tokenType in listOf(TokenType.RIGHT_BRACKET,
+                            TokenType.RIGHT_BRACE)) {
+                        val new = expression.toMutableList()
+                        new.removeLast()
+                        new.removeFirst()
+                        expressions[index] = new
                     }
                 }
             }
-        }
-        println("From split expressions $cleared")
-        return assembleMathToken(processSingleCoefficient(cleared))
+        } while (start != expressions)
+
+        expressions.removeAll { it.isEmpty() }
+
+//        expressions.log("Generate expressions")
+        return expressions.map { splitByFunctions(it) }
     }
 
-    private fun processSingleCoefficient(tokens: List<List<Token>>): List<MathToken> {
-        val mutableTokens = tokens.toMutableList()
-        val mathTokens = mutableListOf<Pair<MathToken, List<Int>>>()
+    /**
+     * The boolean in the list of pairs reflects whether the value is inside brackets or part of a function expression
+     * This is important for the [splitByPowers] method, which must know this.
+     */
+    private fun splitByFunctions(tokens: List<Token>): MathToken{
+        val bracketsOpened = stackOf<Int>()
+        val split: MutableList<Pair<List<Token>, Boolean>> = mutableListOf()
+        val functionsPositions = mutableListOf<Int>()
+        var lastSavedIndex = 0
+        var functionsOpened = stackOf<Boolean>()
+        var parametersRequired = 0
 
-        val functionPositions = stackOf<Int>()
-        mutableTokens.forEachIndexed {index, tokenList ->
-            if (tokenList.first().tokenType == TokenType.OPERATION) functionPositions.push(index)
-        }
-
-        functionPositions.forEach {pos ->
-            val operation = Operations.hashMap[mutableTokens[pos].first().lexeme] ?: throw Exception("Function [${mutableTokens[pos].first().lexeme}] not yet supported")
-            val parameters = mutableListOf<List<Token>>()
-            repeat (operation.parameters.first){ parameters.add(mutableTokens[pos + it + 1]) }
-            println("At pos we find ${mutableTokens[pos]}")
-            println("POS is $pos")
-            println("Parameters is ${operation.parameters.first}")
-            println("Parameters are $parameters")
-            println("Mutable tokens is $mutableTokens")
-            println("Math tokens are $mathTokens")
-            var expression = if (operation.before) {
-                mutableTokens[pos + operation.parameters.first + 1]
-            } else {
-                mutableTokens[pos - 1]
-            }
-            println("Expression is $expression")
-            val rangeUsed = if (operation.before) {
-                pos..(pos + operation.parameters.first + 1)
-            }else {
-                (pos - 1)..(pos + operation.parameters.first)
-            }
-            val mathTokenExpression = if (expression == listOf(Token.replacedToken())) {
-                println("Searching for token containing ${pos+1}")
-                listOf(mathTokens.find { pos+1 in it.second }?.first ?: throw Exception("WEIRD"))
-            }else {
-
-                rangeUsed.forEach {
-                    println("REPLACING AT $it, TOKEN: ${mutableTokens[it]}")
-                    mutableTokens[it] = listOf(Token.replacedToken())
+        tokens.forEachIndexed {index,  token ->
+            //println("LastSavedIndex is $lastSavedIndex")
+            //println("Index is $index")
+//            tokens.log("Tokens", index)
+            when (token.tokenType) {
+                in listOf(TokenType.LEFT_BRACKET, TokenType.LEFT_BRACE) -> {
+                    if (bracketsOpened.isEmpty()) {
+                        split.add(Pair(tokens.subList(lastSavedIndex, index), functionsOpened.isNotEmpty()))
+                        lastSavedIndex = index + 1
+                        if (parametersRequired>0) parametersRequired--
+                        if (functionsOpened.isEmpty()) functionsOpened.pop()
+                    }
+                    bracketsOpened.push(index)
                 }
-
-                generateExpressions(expression)
+                in listOf(TokenType.RIGHT_BRACKET, TokenType.RIGHT_BRACE) -> {
+                    val last = bracketsOpened.pop()
+                    if (bracketsOpened.isEmpty()) {
+                        split.add(Pair(tokens.subList(last + 1, index), true))
+                        lastSavedIndex = index+1
+                    }
+                }
+                TokenType.OPERATION -> {
+                    if (bracketsOpened.isEmpty() && functionsOpened.isEmpty()) {
+                        split.add(Pair(tokens.subList(lastSavedIndex, index), true))
+                        functionsPositions.add(index)
+                        split.add(Pair(listOf(tokens[index]), false))
+                        lastSavedIndex = index + 1
+                        functionsOpened.push(true)
+                        parametersRequired += Operations.hashMap[tokens[index].lexeme]?.parameters?.first ?: throw UnsupportedOperationException()
+                    }
+                }
+                in listOf(TokenType.IDENTIFIER, TokenType.NUMBER) -> { if (bracketsOpened.isEmpty() && functionsOpened.isEmpty()) {
+                    split.add(Pair(tokens.subList(lastSavedIndex, index), functionsOpened.isNotEmpty()))
+                    split.add(Pair(listOf(tokens[index]), functionsOpened.isNotEmpty()))
+                    lastSavedIndex = index + 1
+                    if (parametersRequired>0) parametersRequired--
+                }}
+                else -> {}//if (functionsOpened.isNotEmpty()) functionsOpened.pop()
             }
-
-            val mathTokenParameters = parameters.map {
-                println(it)
-                val result = generateExpressions(it)
-                println("Result is $result")
-                result
-            }
-            println("MathTokenParameters are $mathTokenParameters")
-
-            mathTokens.add(
-                Pair(
-                    MathToken(
-                        coefficient = null,
-                        expression = mathTokenExpression,
-                        parameters = mathTokenParameters,
-                        variables = emptyMap(),
-                        function = operation.function
-                    ),
-                    rangeUsed.toList()
-                )
-            )
         }
-
-        mutableTokens.removeAll { it.first() == Token.replacedToken() }
-        println(mutableTokens)
-        mutableTokens.forEach {
-            val token = if (it.size == 1 && it.first().tokenType == TokenType.NUMBER) listOf(it.first().literal as Double)
-                        else if (it.size == 1 && it.first().tokenType == TokenType.IDENTIFIER) listOf(it.first().lexeme)
-                        else generateExpressions(it)
-            mathTokens.add(
-                Pair(
-                    MathToken(
-                        coefficient = null,
-                        expression = token,
-                        variables = emptyMap(),
-                        parameters = emptyList(),
-                        function = null
-                    ),
-                    emptyList()
-                )
-            )
+        split.add(Pair(tokens.subList(lastSavedIndex, tokens.size), false))
+        val cleared = mutableListOf<Pair<List<Token>, Boolean>>()
+        split.forEach {
+            if (it.first.isNotEmpty()) cleared.add(it)
         }
-        println("From single coefficient $mathTokens")
-        return mathTokens.map { it.first }
+        //println("From split by functions is $cleared")
+
+        return splitByPowers(cleared)
     }
 
-    private fun assembleMathToken(tokens: List<MathToken>) : MathToken {
+    /**
+     * Next level of priority after functions, so next sublist
+     */
+    private fun splitByPowers(allTokens: List<Pair<List<Token>, Boolean>>): MathToken {
+        val result: MutableList<MutableList<MutableList<Token>>> = mutableListOf()
+
+        allTokens.forEachIndexed { index, tokens ->
+            //allTokens.log("AllTokens", index)
+
+            if (!tokens.second) {
+                var powerIndex: Int? = null
+                for (index in tokens.first.indices) {
+                    val token = tokens.first[index]
+                    if (token.tokenType == TokenType.POWER) {powerIndex = index ; break}
+                }
+                if (powerIndex != null) {
+                    val first = tokens.first.subList(0, powerIndex).toMutableList()
+                    val power = mutableListOf(tokens.first[powerIndex])
+                    val second = tokens.first.subList(powerIndex + 1, tokens.first.size).toMutableList()
+                    result.add(
+                        run {
+                            val adding = mutableListOf<MutableList<Token>>()
+                            if (first.isNotEmpty()) adding.add(first)
+                            adding.add(power)
+                            if (second.isNotEmpty()) adding.add(second)
+                            adding
+                        }
+                    )
+                } else {
+                    result.add(
+                        mutableListOf(tokens.first.toMutableList())
+                    )
+                }
+            }else {
+                result.add(
+                    mutableListOf(tokens.first.toMutableList())
+                )
+            }
+            //println("Result : ")
+            //println(result)
+        }
+        //println("FROM RESULT : $result")
+        try {
+            return fixSplitPowerResult(result)
+        }catch (_: NotImplementedError){
+            exitProcess(0)
+        }
+    }
+
+    /**
+     * Due to variations of how powers can be inputted the result of the previous function needs to be fixed
+     */
+    private fun fixSplitPowerResult(givenTokens: MutableList<MutableList<MutableList<Token>>>): MathToken {
+        var skipping = false
+
+        val result: MutableList<MutableList<MutableList<Token>>> = mutableListOf()
+
+        for (i in givenTokens.indices) {
+            val index = givenTokens.lastIndex - i
+            if (skipping) {skipping = false; continue}
+            val tokenList = givenTokens[index]
+
+            when {
+                tokenList.first().first().tokenType == TokenType.POWER && tokenList.size == 1 -> {
+                    val last = result.removeLast()
+                    result.addFirst(
+                        (givenTokens[index-1] + tokenList + last).toMutableList()
+                    )
+                    skipping = true
+                }
+                tokenList.first().first().tokenType == TokenType.POWER -> {
+                    result.addFirst(
+                        (givenTokens[index-1] + tokenList).toMutableList()
+                    )
+                    skipping = true
+                }
+                tokenList.last().last().tokenType == TokenType.POWER -> {
+                    val last = result.removeLast()
+                    result.addFirst(
+                        (tokenList + last).toMutableList()
+                    )
+                }
+                else -> result.addFirst(tokenList)
+            }
+//            result.log("Result", null)
+        }
+        //println("Result After Fix : ")
+        //println(result)
+        return assembleFunctionExpressions(result)
+    }
+
+    /**
+     * Creates a [Function]
+     */
+    private fun assembleFunctionExpressions(givenTokens: MutableList<MutableList<MutableList<Token>>>): MathToken {
+        val functionPositions = mutableMapOf<Int, Operation>()
+        val intRanges = mutableListOf<Int>()
+        givenTokens.forEachIndexed { index, tokensList ->
+            if (tokensList.first().first().tokenType == TokenType.OPERATION && tokensList.first().size == 1 && tokensList.size == 1)
+                functionPositions.put(index, Operations.hashMap[tokensList.first().first().lexeme] ?: throw UnsupportedOperationException(tokensList.first().first().lexeme))
+        }
+
+        val result = mutableListOf<Function>()
+//        givenTokens.log("Given tokens")
+        functionPositions.forEach {
+            val operation = it.value
+            val index = it.key
+
+            val parameters = mutableListOf<MutableList<MutableList<Token>>>()
+            repeat (operation.parameters.first){ parameters.add(givenTokens[index+it + 1]) }
+//            parameters.log("Parameters")
+            val expression = if (operation.before) {
+                givenTokens[index + operation.parameters.first + 1]
+            } else {
+                givenTokens[index - 1]
+            }
+//            expression.log("Expression")
+
+            result.add(
+                Function(
+                    function = operation,
+                    expression = assemblePowerExpressions(expression),
+                    parameters = parameters.map { parameter -> assemblePowerExpressions(parameter) }
+                )
+            )
+
+            intRanges.addAll(
+                if (operation.before) index..index + operation.parameters.first + 1
+                else index - 1..index + operation.parameters.first
+            )
+        }
+        givenTokens.removeAtIndexes(intRanges)
+//        givenTokens.log("Given tokens after removed")
+
+        result.addAll(givenTokens.map {
+            Function(
+                function = null,
+                expression = assemblePowerExpressions(it),
+                parameters = emptyList(),
+            )
+        })
+
+//        result.log("Function result")
+
+        return assembleMathTokens(result.map { function -> function.assembleMathToken(null) })
+    }
+
+    /**
+     * Creates a power
+     */
+    private fun assemblePowerExpressions(givenTokens: MutableList<MutableList<Token>>) : Power {
+        if (!givenTokens.any { it.first().tokenType == TokenType.POWER }) return Power(
+            expression = givenTokens.first(),
+            power = listOf(Token(TokenType.NUMBER, "1", 1))
+        )
+
+        return Power(
+            expression = givenTokens.first(),
+            power = givenTokens.last()
+        )
+    }
+
+    /**
+     * Returns a math token with a null coefficient
+     */
+    private fun assembleExpression(tokens: List<Token>) : List<MathToken> {
+        val expression =
+            if (tokens.size == 1 && tokens.first().tokenType == TokenType.NUMBER) listOf(tokens.first().literal.toString().toDouble())
+            else if (tokens.size == 1 && tokens.first().tokenType == TokenType.IDENTIFIER) listOf(tokens.first().lexeme)
+            else return generateExpressions(tokens)
+
+        return listOf(MathToken(
+            coefficient = null,
+            expression = expression,
+            parameters = emptyList(),
+            function = null
+        ))
+    }
+
+    /**
+     * Converts a list of null math tokens into a single one
+     */
+    private fun assembleMathTokens(tokens: List<MathToken>) : MathToken {
         var mathToken: MathToken = tokens.first()
 
         for (index in 1..tokens.lastIndex) {
@@ -233,57 +445,72 @@ class MathScanner(
                 coefficient = mathToken
             )
         }
-        println("From assemble token $mathToken")
+        //println("From assemble token $mathToken")
         return mathToken
     }
-
-    fun regenerateTokens(tokens: List<Token>): List<Token> {
+    private fun regenerateTokens(tokens: List<Token>): List<Token> {
+        val new = tokens.toMutableList()
+        val falsePlusIndexes = mutableListOf<Int>()
+        for (index in new.indices) {
+            if (new[index].tokenType == TokenType.PLUS && new[index].lexeme != "+"){
+                falsePlusIndexes.add(index)
+            }
+        }
+        new.removeAtIndexes(falsePlusIndexes)
         var str = " "
-        tokens.forEach {
+        new.forEach {
+            ////println(it)
             str += it.lexeme+" "
         }
         return Scanner(str).scanTokens()
     }
 
-    private fun joinFunctions(split: List<List<Token>>): List<List<List<Token>>> {
-        val mutableSplit = split.toMutableList()
-        val result: MutableList<Pair<MutableList<MutableList<Token>>, IntRange>> = mutableListOf()
-
-        val functionPositions = stackOf<Int>()
-        split.forEachIndexed { index, tokenList ->
-            if (tokenList.first().tokenType == TokenType.OPERATION) {
-                functionPositions.push(index)
+    fun findDerivatives(tokens: List<Token>): List<Token> {
+        val result = tokens.toMutableList()
+        var skipping = 0
+        for (i in tokens.indices) {
+            if (skipping > 0){skipping--; continue}
+            if (
+                tokens[i].lexeme == "frac"
+                &&
+                tokens[i + 1].tokenType == TokenType.LEFT_BRACE
+                &&
+                tokens[i + 2].lexeme[0] == 'd'
+                &&
+                tokens[i + 3].tokenType == TokenType.RIGHT_BRACE
+                &&
+                tokens[i + 4].tokenType == TokenType.LEFT_BRACE
+                &&
+                tokens[i + 5].lexeme[0] == 'd'
+                &&
+                tokens[i + 5].lexeme.length > 1
+                &&
+                tokens[i + 6].tokenType == TokenType.RIGHT_BRACE
+            ){
+                skipping += 7
+                if (tokens[i + 2].lexeme.length > 1){
+                    result[i] = result[i].copy(
+                        lexeme = "diffequation"
+                    )
+                    result[i+2] = tokens[i+2].copy(
+                        lexeme = tokens[i + 2].lexeme.takeLast(tokens[i+2].lexeme.length - 1)
+                    )
+                    result[i+5] = tokens[i+5].copy(
+                        lexeme = tokens[i+5].lexeme.takeLast(tokens[i+5].lexeme.length - 1)
+                    )
+                }else{
+                    result[i] = result[i].copy(
+                        lexeme = "differentiate"
+                    )
+                    result[i+5] = tokens[i+5].copy(
+                        lexeme = tokens[i+5].lexeme.takeLast(tokens[i+5].lexeme.length - 1)
+                    )
+                    result.removeAtIndexes((i+1..i+3).toList())
+                }
+            }else{
+                result.add(tokens[i])
             }
         }
-
-        functionPositions.forEach{ pos ->
-            val tba = mutableListOf<MutableList<Token>>()
-            val first = mutableSplit[pos].first()
-
-            val operation = Operations.hashMap[first.lexeme] ?: throw Exception("Function [${first.lexeme}] not yet supported")
-            val parameters = mutableListOf<List<Token>>()
-            repeat (operation.parameters.first){ parameters.add(mutableSplit[pos + it + 1]) }
-
-            var expression = if (operation.before) {
-                mutableSplit[pos + 1 + operation.parameters.first]
-            }else {
-                mutableSplit[pos - 1]
-            }
-
-            expression = if (expression == listOf(Token.replacedToken())) {
-                result.find { pos in it.second }?.first?.combine() ?: throw Exception("Weird")
-            } else {
-
-                expression
-            }
-        }
-
-        return result.map { it.first }
-    }
-
-    fun List<List<Token>>.combine(): List<Token> {
-        val result: MutableList<Token> = mutableListOf()
-        forEach { result.addAll(it) }
         return result
     }
 }

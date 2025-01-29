@@ -24,6 +24,7 @@ class Scanner(
     //Keep track of current position in the latex statement
     private var start: Int = 0
     private var current: Int = 0
+    private var addRightBracketOnNext = false
 
     companion object {
         val constants = hashMapOf<String, Double>(
@@ -48,7 +49,7 @@ class Scanner(
     private fun isAtEnd() = current >= source.length
 
     private fun isDigit(char: Char) = char in '0'..'9'
-    private fun isLetter(char: Char) = char in 'a'..'z' || char in 'A'..'Z' || char == '_'
+    private fun isLetter(char: Char) = char in 'a'..'z' || char in 'A'..'Z'
     private fun isAlphaNumeric(char: Char) = isLetter(char) || isDigit(char)
 
     private fun scanToken() {
@@ -60,15 +61,21 @@ class Scanner(
             ')' -> addToken(TokenType.RIGHT_BRACKET)
             '+' -> addToken(TokenType.PLUS)
             //Added before plus, use for error stuff
-            '-' -> {addToken(TokenType.PLUS);addToken(TokenType.OPERATION)}
+            '-' -> {
+                if (tokens.last().tokenType != TokenType.PLUS) addToken(TokenType.PLUS)
+                addToken(TokenType.OPERATION)
+            }
             '*' -> addToken(TokenType.OPERATION)
             '/' -> addToken(TokenType.OPERATION)
             '^' -> addToken(TokenType.POWER)
             //Added before and after pluses, use for error stuff
-            '=' -> {addToken(TokenType.PLUS);addToken(TokenType.EQUAL);addToken(TokenType.PLUS)}
+            '=' -> {
+                if (tokens.last().tokenType != TokenType.PLUS) addToken(TokenType.PLUS)
+                addToken(TokenType.EQUAL);addToken(TokenType.PLUS)}
             //Removed to improve math scanner
             //'\\' -> addToken(TokenType.BACK_SLASH)
-            in listOf(' ', '\r', '\t', '\n', '\\', '_') -> {}
+            '_' -> {addRightBracketOnNext = true; addToken(TokenType.LEFT_BRACE); return}
+            in listOf(' ', '\r', '\t', '\n', '\\') -> {}
             else -> {
                 if (isDigit(c)) {
                     number()
@@ -78,6 +85,12 @@ class Scanner(
                     println("ERROR at $c")
                 }
             }
+        }
+        if (addRightBracketOnNext && tokens.last().tokenType != TokenType.LEFT_BRACE) {
+            addToken(TokenType.RIGHT_BRACE)
+            addRightBracketOnNext = false
+        }else{
+            addRightBracketOnNext = false
         }
     }
 

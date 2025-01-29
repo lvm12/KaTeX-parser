@@ -14,7 +14,6 @@ import kotlin.reflect.KClass
 data class MathToken(
     val coefficient : MathToken?,
     val expression : List<Any>,
-    val variables: Map<String, Double>,
     val parameters: List<Any>,
     val function : ((expression: List<Any>, parameters: List<Any>, variables: Map<String, Double>) -> Double)?,
 ) {
@@ -27,7 +26,7 @@ data class MathToken(
     }
 
     override fun toString(): String {
-        return "MathToken(coeffient = $coefficient, expression = $expression, variables = $variables, parameters = $parameters, function = ${run { 
+        return "MathToken(coeffient = $coefficient, expression = $expression, parameters = $parameters, function = ${run { 
             var str = "null"
             val operations = Operations.hashMap.values
             operations.forEach { 
@@ -37,7 +36,7 @@ data class MathToken(
         }})"
     }
 
-    fun evaluate(): Double {
+    fun evaluate(variables: Map<String, Double>): Double {
         return if (coefficient == null) {
             if (function != null) {
                 function(expression, parameters, variables)
@@ -46,22 +45,26 @@ data class MathToken(
             }
         }else {
             if (function != null) {
-                coefficient.evaluate() * function(expression, parameters, variables)
+                coefficient.evaluate(variables) * function(expression, parameters, variables)
             }else {
                 var total = 0.0
                 expression.forEach {
                     if (it is MathToken) {
-                        total += it.evaluate()
+                        total += it.evaluate(variables)
                     }else if (it is Double) {
                         total += it
+                    }else if (it is String) {
+                        total += variables[it] ?: throw IllegalVariableException(it)
+                    }else{
+                        UnsupportedTypeException(it::class)
                     }
                 }
-                return coefficient.evaluate() * total
+                return coefficient.evaluate(variables) * total
             }
         }
     }
 
-    operator fun invoke(): Double = evaluate()
+    operator fun invoke(variables: Map<String, Double>): Double = evaluate(variables)
 }
 
 /**
@@ -77,7 +80,11 @@ fun List<Any>.evaluate(variables: Map<String, Double>): Double {
             total += it
         }else if (it is MathToken) {
             //println("IT is $it")
-            total += it.copy(variables = variables).evaluate()
+            total += it.copy().evaluate(variables)
+        }else if (it is String) {
+            total += variables[it] ?: throw IllegalVariableException(it)
+        }else{
+            UnsupportedTypeException(it::class)
         }
     }
     return total
@@ -86,3 +93,4 @@ fun List<Any>.evaluate(variables: Map<String, Double>): Double {
 operator fun List<MathToken>.invoke(variables: Map<String, Double>): Double = evaluate(variables)
 
 class UnsupportedTypeException(type: KClass<*>) : Exception("Unsupported type: $type")
+class IllegalVariableException(variable: String) : Exception("Illegal variable: $variable")
