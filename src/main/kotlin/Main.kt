@@ -1,34 +1,55 @@
 package uk.co.purpleeagle
 
+import uk.co.purpleeagle.algorithms.EulerMethod
 import uk.co.purpleeagle.algorithms.NewtonRaphson
 import uk.co.purpleeagle.mathtokeniser.MathScanner
 import uk.co.purpleeagle.mathtokeniser.MathToken
 import uk.co.purpleeagle.mathtokeniser.Operations
 import uk.co.purpleeagle.mathtokeniser.evaluate
 import uk.co.purpleeagle.tokeniser.Scanner
+import uk.co.purpleeagle.util.printOutAllFunctions
 
 fun main(args: Array<String>) {
-
+    printOutAllFunctions()
     do {
+        println("Mode (n or d): ")
+        val mode = readLine()?.get(0)?.lowercase()
         println("Expression: ")
         val tex = readLine()
-//        println("X value : ")
-//        val x = readLine()
-        if (tex != null /*&& x != null*/) {
-            val expression = Scanner(tex).scanTokens()
-            //val varTokens = Scanner(x).scanTokens()
-            //val varValue = MathScanner.evaluateExpression(varTokens).evaluate(emptyMap())
-            //val mathTokens = MathScanner.evaluateExpression(expression)
-            val equation = MathScanner(expression.toMutableList()).getEquation()
-            println("x=${NewtonRaphson(equation, "x", 0.00001, 0.0001).solve()}")
-//            val diff = MathToken(
-//                coefficient = null,
-//                expression = mathTokens,
-//                parameters = listOf(0.1),
-//                function = Operations.differentiate.function
-//            )
-//            println(diff.evaluate(mapOf("x" to 0.1)))
-        //println(mathTokens.evaluate(mapOf("x" to varValue)))
+        if (tex != null && mode != null) {
+            when (mode) {
+                "n" -> standardEquation(tex)
+                "d" -> differentialEquation(tex)
+            }
         }
     }while (tex != null)
+}
+
+fun standardEquation(tex: String) {
+    println("Variable: ")
+    val variable = readLine() ?: "x"
+    val expression = Scanner(tex).scanTokens()
+    val equation = MathScanner(expression.toMutableList(), true).getEquation()
+    println("x=${NewtonRaphson(equation, variable, 0.00001, 0.0001).solve()}")
+}
+
+fun differentialEquation(tex: String) {
+    var count = 0
+    val variables = mutableMapOf<String, Double>()
+    do {
+        println("Initial value ($count): ")
+        val read = readLine() ?: break
+        variables["$count"] = read.toDoubleOrNull() ?: break
+        count++
+    }while (true)
+    println("Target: ")
+    val target = readLine()?.toDouble() ?: 0.0
+    val expression = Scanner(tex).scanTokens()
+    val equation = MathScanner(expression.toMutableList(), true).getEquation()
+    println(EulerMethod(
+        equation = equation,
+        delta = 0.5,
+        variables = variables,
+        target = target
+    ))
 }

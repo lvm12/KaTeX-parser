@@ -11,6 +11,8 @@ import kotlin.reflect.KClass
  * @property evaluate Evaluates a token to a double
  * @property invoke Shorthand for the evaluate method
  */
+
+
 data class MathToken(
     val coefficient : MathToken?,
     val expression : List<Any>,

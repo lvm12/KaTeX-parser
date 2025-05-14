@@ -12,6 +12,8 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+
+    implementation("com.tylerthrailkill.helpers:pretty-print:v2.0.8")
 }
 
 tasks.test {

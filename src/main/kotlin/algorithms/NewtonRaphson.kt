@@ -15,12 +15,12 @@ class NewtonRaphson (
 
     init {
         equation = equation.copy(
-            lhs = equation.lhs + MathToken(
+            lhs = (equation.lhs + MathToken(
                 coefficient = null,
                 expression = equation.rhs,
                 parameters = listOf(),
                 function = Operations.negate.function
-            )
+            )).toMutableList()
         )
     }
 
@@ -29,7 +29,7 @@ class NewtonRaphson (
         val fdashx = MathToken(
             coefficient = null,
             expression = equation.lhs,
-            parameters = listOf(h),
+            parameters = listOf(variable, h),
             function = Operations.differentiate.function
         )
 

@@ -1,5 +1,6 @@
 package uk.co.purpleeagle.mathtokeniser
 
+import com.tylerthrailkill.helpers.prettyprint.pp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -10,10 +11,12 @@ import uk.co.purpleeagle.tokeniser.Token
 import uk.co.purpleeagle.tokeniser.TokenType
 import uk.co.purpleeagle.util.log
 import uk.co.purpleeagle.util.removeAtIndexes
+import uk.co.purpleeagle.util.toInt
 import kotlin.system.exitProcess
 
 class MathScanner(
     val source: MutableList<Token>,
+    var logging: Boolean = false
 ) {
     /**
      * Holds a value in the form
@@ -91,27 +94,32 @@ class MathScanner(
             }
         }
         rhs = source.subList(equalsIndex+1, source.size)
-        //lhs.log("Lhs")
-        //rhs.log("Rhs")
+        if (logging) {
+            lhs.log("Lhs")
+            rhs.log("Rhs")
+        }
         var lhsMathToken: List<MathToken> = emptyList()
         val lhsJob = CoroutineScope(Dispatchers.Unconfined).launch {
             lhsMathToken = generateExpressions(lhs)
-            //lhsMathToken.log("LHS MATH TOKEN")
+            if (logging) {//lhsMathToken.log("LHS MATH TOKEN")
+                println("LHS MATH TOKEN")
+                pp(lhsMathToken)
+            }
         }
 
         var rhsMathToken: List<MathToken> = emptyList()
-            //rhs.log("RHS")
+            if (logging) rhs.log("RHS")
         val rhsJob = CoroutineScope(Dispatchers.Unconfined).launch {
             rhsMathToken = generateExpressions(rhs)
-            //rhsMathToken.log("RHS MATH TOKEN")
+            if (logging) rhsMathToken.log("RHS MATH TOKEN")
         }
 
         lhsJob.join()
         rhsJob.join()
 
         return@runBlocking Equation(
-            lhs = lhsMathToken,
-            rhs = rhsMathToken,
+            lhs = lhsMathToken.toMutableList(),
+            rhs = rhsMathToken.toMutableList(),
         )
     }
 
@@ -122,9 +130,8 @@ class MathScanner(
     private fun generateExpressions(givenTokens: List<Token>): List<MathToken> {
         val temp = findDerivatives(givenTokens)
         val sourceTokens = if (temp.first().tokenType != TokenType.PLUS) regenerateTokens(givenTokens)
-        else givenTokens
-//        sourceTokens.log("Source tokens")
-        //println("Source tokens are $sourceTokens")
+        else temp
+        if (logging) sourceTokens.log("Source tokens")
         var bracketOpened = stackOf<Int>()
         var braceOpened = stackOf<Int>()
         var expressions = mutableListOf<List<Token>>()
@@ -147,19 +154,19 @@ class MathScanner(
             }
             current++
         }
-        //println("Plus indexes are $plusIndexes")
+        if (logging) plusIndexes.log("Plus Indexes")
 
         for (i in plusIndexes.indices) {
             try {
                 expressions.add(sourceTokens.subList(plusIndexes[i]+1, plusIndexes[i+1]))
-                //println("Expressions are $expressions")
+                if (logging) expressions.log("Expressions")
             }catch (_: Exception){}
         }
-
         do {
             val start = expressions
 
             expressions.forEachIndexed { index, expression ->
+                if (logging) expressions.log("Expressions", index)
                 var bracketsClosedEarly = false
                 var bracketOpened = stackOf<Int>()
                 if (expression.any { it.tokenType == TokenType.LEFT_BRACKET }) {
@@ -174,7 +181,7 @@ class MathScanner(
                         }
                     }
                 }
-//                expression.log("Expression")
+                if (logging) expression.log("Expression")
                 if (!bracketsClosedEarly) {
                     if (expression.first().tokenType in listOf(TokenType.LEFT_BRACKET, TokenType.LEFT_BRACE) && expression.last().tokenType in listOf(TokenType.RIGHT_BRACKET,
                             TokenType.RIGHT_BRACE)) {
@@ -189,7 +196,7 @@ class MathScanner(
 
         expressions.removeAll { it.isEmpty() }
 
-//        expressions.log("Generate expressions")
+        if (logging) expressions.log("Generate expressions")
         return expressions.map { splitByFunctions(it) }
     }
 
@@ -206,9 +213,11 @@ class MathScanner(
         var parametersRequired = 0
 
         tokens.forEachIndexed {index,  token ->
-            //println("LastSavedIndex is $lastSavedIndex")
-            //println("Index is $index")
-//            tokens.log("Tokens", index)
+            if (logging) {
+                println("LastSavedIndex is $lastSavedIndex")
+                println("Index is $index")
+                tokens.log("Tokens", index)
+            }
             when (token.tokenType) {
                 in listOf(TokenType.LEFT_BRACKET, TokenType.LEFT_BRACE) -> {
                     if (bracketsOpened.isEmpty()) {
@@ -250,7 +259,7 @@ class MathScanner(
         split.forEach {
             if (it.first.isNotEmpty()) cleared.add(it)
         }
-        //println("From split by functions is $cleared")
+        if (logging) cleared.log("Split by expressions")
 
         return splitByPowers(cleared)
     }
@@ -262,7 +271,7 @@ class MathScanner(
         val result: MutableList<MutableList<MutableList<Token>>> = mutableListOf()
 
         allTokens.forEachIndexed { index, tokens ->
-            //allTokens.log("AllTokens", index)
+            if (logging) allTokens.log("AllTokens", index)
 
             if (!tokens.second) {
                 var powerIndex: Int? = null
@@ -293,10 +302,9 @@ class MathScanner(
                     mutableListOf(tokens.first.toMutableList())
                 )
             }
-            //println("Result : ")
-            //println(result)
+            if (logging) result.log("Result")
         }
-        //println("FROM RESULT : $result")
+        if (logging) result.log("FROM RESULT")
         try {
             return fixSplitPowerResult(result)
         }catch (_: NotImplementedError){
@@ -339,10 +347,9 @@ class MathScanner(
                 }
                 else -> result.addFirst(tokenList)
             }
-//            result.log("Result", null)
+            if (logging) result.log("Result", null)
         }
-        //println("Result After Fix : ")
-        //println(result)
+        if (logging) result.log("Result after fix")
         return assembleFunctionExpressions(result)
     }
 
@@ -358,20 +365,26 @@ class MathScanner(
         }
 
         val result = mutableListOf<Function>()
-//        givenTokens.log("Given tokens")
+        if (logging) givenTokens.log("Given tokens")
         functionPositions.forEach {
             val operation = it.value
             val index = it.key
 
             val parameters = mutableListOf<MutableList<MutableList<Token>>>()
             repeat (operation.parameters.first){ parameters.add(givenTokens[index+it + 1]) }
-//            parameters.log("Parameters")
-            val expression = if (operation.before) {
+            if (logging) parameters.log("Parameters")
+            val expression = if (operation.before && operation.parameters.second) {
                 givenTokens[index + operation.parameters.first + 1]
-            } else {
+            } else if (!operation.before && operation.parameters.second) {
                 givenTokens[index - 1]
+            }else{
+                mutableListOf(mutableListOf(Token(
+                    tokenType = TokenType.NUMBER,
+                    lexeme = "1",
+                    literal = 1
+                )))
             }
-//            expression.log("Expression")
+            if (logging) expression.log("Expression")
 
             result.add(
                 Function(
@@ -382,12 +395,12 @@ class MathScanner(
             )
 
             intRanges.addAll(
-                if (operation.before) index..index + operation.parameters.first + 1
-                else index - 1..index + operation.parameters.first
+                if (operation.before) index..index + operation.parameters.first + operation.parameters.second.toInt()
+                else index - operation.parameters.second.toInt()..index + operation.parameters.first
             )
         }
         givenTokens.removeAtIndexes(intRanges)
-//        givenTokens.log("Given tokens after removed")
+        if (logging) givenTokens.log("Given tokens after removed")
 
         result.addAll(givenTokens.map {
             Function(
@@ -397,7 +410,7 @@ class MathScanner(
             )
         })
 
-//        result.log("Function result")
+        if (logging) result.log("Function result")
 
         return assembleMathTokens(result.map { function -> function.assembleMathToken(null) })
     }
@@ -437,7 +450,7 @@ class MathScanner(
     /**
      * Converts a list of null math tokens into a single one
      */
-    private fun assembleMathTokens(tokens: List<MathToken>) : MathToken {
+    fun assembleMathTokens(tokens: List<MathToken>) : MathToken {
         var mathToken: MathToken = tokens.first()
 
         for (index in 1..tokens.lastIndex) {
@@ -445,7 +458,7 @@ class MathScanner(
                 coefficient = mathToken
             )
         }
-        //println("From assemble token $mathToken")
+        if (logging) println("From assemble token $mathToken")
         return mathToken
     }
     private fun regenerateTokens(tokens: List<Token>): List<Token> {
@@ -459,16 +472,20 @@ class MathScanner(
         new.removeAtIndexes(falsePlusIndexes)
         var str = " "
         new.forEach {
-            ////println(it)
+            if (logging) println(it)
             str += it.lexeme+" "
         }
         return Scanner(str).scanTokens()
     }
 
     fun findDerivatives(tokens: List<Token>): List<Token> {
+        // Stores Index:Order of differential
+        val orderList = sortedMapOf<Int, Int>()
+        if (logging) println(tokens)
         val result = tokens.toMutableList()
         var skipping = 0
         for (i in tokens.indices) {
+            if (logging) result.log("Result before", i)
             if (skipping > 0){skipping--; continue}
             if (
                 tokens[i].lexeme == "frac"
@@ -498,19 +515,86 @@ class MathScanner(
                     result[i+5] = tokens[i+5].copy(
                         lexeme = tokens[i+5].lexeme.takeLast(tokens[i+5].lexeme.length - 1)
                     )
+                    orderList[i] = 1
                 }else{
-                    result[i] = result[i].copy(
+                    result[i] = tokens[i].copy(
                         lexeme = "differentiate"
                     )
                     result[i+5] = tokens[i+5].copy(
                         lexeme = tokens[i+5].lexeme.takeLast(tokens[i+5].lexeme.length - 1)
                     )
-                    result.removeAtIndexes((i+1..i+3).toList())
+                    for(i in i+1..i+3){
+                        orderList[i] = -1
+                    }
                 }
+            }
+            if (
+                tokens[i].lexeme == "frac"
+                &&
+                tokens[i + 1].tokenType == TokenType.LEFT_BRACE
+                &&
+                tokens[i + 2].lexeme == "d"
+                &&
+                tokens[i + 3].lexeme == "^"
+                &&
+                tokens[i + 4].tokenType == TokenType.LEFT_BRACE
+                &&
+                tokens[i + 5].tokenType == TokenType.NUMBER
+                &&
+                tokens[i + 6].tokenType == TokenType.RIGHT_BRACE
+                &&
+                tokens[i + 7].tokenType == TokenType.IDENTIFIER
+                &&
+                tokens[i+8].tokenType == TokenType.RIGHT_BRACE
+                &&
+                tokens[i + 10].lexeme.matches("^[^d]*d[a-zA-Z]+".toRegex())
+            ){
+                result[i] = tokens[i].copy(
+                    lexeme = "diffequation"
+                )
+                orderList[i] = tokens[i+5].lexeme.toInt()
+                result[i+10] = tokens[i+10].copy(
+                    lexeme = tokens[i+10].lexeme.takeLast(tokens[i+10].lexeme.length - 1)
+                )
+                for(i in i+2..i+6){
+                    orderList[i] = -1
+                }
+                for(i in i+11..i+14){
+                    orderList[i] = -1
+                }
+            }
+            if (logging) result.log("Result after", i)
+            if (logging) result.log("Result after", i)
+        }
+        for (i in orderList.reversed()){
+            val index = i.key
+            val order = i.value
+
+            if (order>=0) {
+                result.addAll(
+                    index + 1, listOf(
+                        Token(
+                            TokenType.LEFT_BRACE,
+                            "{",
+                            null
+                        ),
+                        Token(
+                            TokenType.NUMBER,
+                            order.toString(),
+                            order
+                        ),
+                        Token(
+                            TokenType.RIGHT_BRACE,
+                            "}",
+                            null
+                        )
+                    )
+                )
             }else{
-                result.add(tokens[i])
+                result.removeAt(index)
             }
         }
+        if(logging) result.log("Final result in derivatives")
         return result
     }
 }
