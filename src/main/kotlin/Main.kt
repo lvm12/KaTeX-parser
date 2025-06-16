@@ -1,6 +1,5 @@
 package uk.co.purpleeagle
 
-import uk.co.purpleeagle.algorithms.EulerMethod
 import uk.co.purpleeagle.algorithms.NewtonRaphson
 import uk.co.purpleeagle.constants.ConstantSets
 import uk.co.purpleeagle.mathtokeniser.MathScanner
@@ -50,10 +49,4 @@ fun differentialEquation(tex: String) {
     val target = readLine()?.toDouble() ?: 0.0
     val expression = Scanner(tex).scanTokens()
     val equation = MathScanner(expression.toMutableList(), true).getEquation()
-    println(EulerMethod(
-        equation = equation,
-        delta = 0.5,
-        variables = variables,
-        target = target
-    ))
 }
