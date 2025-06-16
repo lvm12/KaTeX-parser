@@ -1,8 +1,7 @@
 package uk.co.purpleeagle.tokeniser
 
+import uk.co.purpleeagle.constants.ConstantSets
 import uk.co.purpleeagle.mathtokeniser.Operations
-import kotlin.math.E
-import kotlin.math.PI
 
 /**
  * Scanner to get every token
@@ -11,8 +10,15 @@ import kotlin.math.PI
  * @property tokens The list of currently found tokens
  */
 class Scanner(
-    val source: String
+    val source: String,
 ) {
+
+    private val constants: Map<String, Double> = emptyMap()
+    fun useConstants(vararg constants: Pair<String, Double>) = apply { this.constants + mapOf(*constants) }
+    fun useConstants(vararg constants: Map<String, Double>) = apply{
+        constants.forEach { this.constants + it }
+    }
+
     val tokens: ArrayList<Token> = arrayListOf()
 
     fun reset() {
@@ -21,19 +27,12 @@ class Scanner(
         current = 0
     }
 
-    //Keep track of current position in the latex statement
+    //Keep track of the current position in the latex statement
     private var start: Int = 0
     private var current: Int = 0
     private var addRightBracketOnNext = false
 
-    companion object {
-        val constants = hashMapOf<String, Double>(
-            "pi" to PI,
-            "e" to E,
-        )
-    }
-
-    fun scanTokens(): List<Token> {
+    fun scanTokens(): MutableList<Token> {
         addToken(TokenType.PLUS)
         while (!isAtEnd()) {
             start = current
@@ -60,7 +59,7 @@ class Scanner(
             '(' -> addToken(TokenType.LEFT_BRACKET)
             ')' -> addToken(TokenType.RIGHT_BRACKET)
             '+' -> addToken(TokenType.PLUS)
-            //Added before plus, use for error stuff
+            //Added before plus, use it for error stuff
             '-' -> {
                 if (tokens.last().tokenType != TokenType.PLUS) addToken(TokenType.PLUS)
                 addToken(TokenType.OPERATION)
@@ -68,7 +67,7 @@ class Scanner(
             '*' -> addToken(TokenType.OPERATION)
             '/' -> addToken(TokenType.OPERATION)
             '^' -> addToken(TokenType.POWER)
-            //Added before and after pluses, use for error stuff
+            //Added before and after pluses, use it for error stuff
             '=' -> {
                 if (tokens.last().tokenType != TokenType.PLUS) addToken(TokenType.PLUS)
                 addToken(TokenType.EQUAL);addToken(TokenType.PLUS)}
@@ -152,7 +151,7 @@ class Scanner(
         addToken(tokenType, null)
     }
 
-    private fun addToken(tokenType: TokenType, literal: Any?, ) {
+    private fun addToken(tokenType: TokenType, literal: Any? ) {
         val string = source.substring(start, current)
         tokens.add(Token(tokenType, string, literal))
     }
